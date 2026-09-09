@@ -1,0 +1,16 @@
+[gd_scene format=3 uid="uid://da3al7vdvp863"]
+
+[ext_resource type="Script" uid="uid://dtai4sdmjy64g" path="res://spell.gd" id="1_35i8j"]
+
+[sub_resource type="CanvasItemMaterial" id="CanvasItemMaterial_35i8j"]
+blend_mode = 1
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_35i8j"]
+radius = 6.0
+
+[node name="Spell" type="Area2D" unique_id=1994245867]
+material = SubResource("CanvasItemMaterial_35i8j")
+script = ExtResource("1_35i8j")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=1976454010]
+shape = SubResource("CircleShape2D_35i8j")

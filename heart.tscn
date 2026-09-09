@@ -1,0 +1,19 @@
+[gd_scene format=3 uid="uid://bpbcygtg57oqt"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_m6be4"]
+radius = 11.0
+
+[node name="Heart" type="Area2D" unique_id=1040075019 groups=["hearts"]]
+
+[node name="Label" type="Label" parent="." unique_id=1916132098]
+offset_left = -16.0
+offset_top = -16.0
+offset_right = 16.0
+offset_bottom = 16.0
+theme_override_font_sizes/font_size = 24
+text = "❤️"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=53794466]
+shape = SubResource("CircleShape2D_m6be4")

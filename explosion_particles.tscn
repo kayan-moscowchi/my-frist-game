@@ -1,0 +1,25 @@
+[gd_scene format=3 uid="uid://bw6xcsdvl7ixh"]
+
+[ext_resource type="Script" uid="uid://o6osxkdkgrfy" path="res://explosion_particles.gd" id="1_regki"]
+
+[sub_resource type="Gradient" id="Gradient_g8fgh"]
+offsets = PackedFloat32Array(0, 0.4855908, 1)
+colors = PackedColorArray(1, 0.9019608, 0, 1, 0.9019608, 0.23137255, 0, 1, 0.16862746, 0.16862746, 0.16862746, 0)
+
+[node name="ExplosionParticles" type="CPUParticles2D" unique_id=506621409]
+z_index = 50
+emitting = false
+amount = 30
+lifetime = 0.5
+one_shot = true
+explosiveness = 1.0
+spread = 180.0
+gravity = Vector2(0, 0)
+initial_velocity_min = 120.0
+initial_velocity_max = 220.0
+damping_min = 100.0
+damping_max = 150.0
+scale_amount_min = 5.0
+scale_amount_max = 10.0
+color_ramp = SubResource("Gradient_g8fgh")
+script = ExtResource("1_regki")

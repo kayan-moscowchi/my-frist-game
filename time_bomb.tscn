@@ -1,0 +1,27 @@
+[gd_scene format=3 uid="uid://dw7q5mjotgje"]
+
+[ext_resource type="Texture2D" uid="uid://chwnpdb888k1s" path="res://time_bomb.png" id="1_0lfuq"]
+[ext_resource type="Script" uid="uid://b8d5r5pvxwcx1" path="res://time_bomb.gd" id="1_ikjg5"]
+[ext_resource type="AudioStream" uid="uid://da7oqxlous6by" path="res://time_bomb_sound.ogg" id="3_pt2pq"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_y7tn2"]
+radius = 110.0
+
+[node name="TimeBomb" type="Area2D" unique_id=982122184 groups=["time_bombs"]]
+script = ExtResource("1_ikjg5")
+
+[node name="Sprite2D" type="Sprite2D" parent="." unique_id=1162446781]
+z_index = 1
+
+[node name="TimeBomb" type="Sprite2D" parent="." unique_id=27933241]
+scale = Vector2(0.1, 0.1)
+texture = ExtResource("1_0lfuq")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=1796489294]
+shape = SubResource("CircleShape2D_y7tn2")
+disabled = true
+
+[node name="ExplodeSound" type="AudioStreamPlayer" parent="." unique_id=306918939]
+stream = ExtResource("3_pt2pq")
+volume_db = -0.9
+bus = &"SFX"
