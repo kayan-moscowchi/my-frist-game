@@ -11,14 +11,11 @@ var segment_positions: Array[Vector2] = []
 var wave_phase: float = 0.0
 var tongue_timer: float = 0.0
 
-@onready var body_line: Line2D = $BodyLine
-
 func _ready() -> void:
 	add_to_group("snakes")
 	area_entered.connect(_on_area_entered)
 	player_ref = get_tree().get_first_node_in_group("player")
 
-	body_line.show_behind_parent = true
 	rotation = 0.0
 
 	for i in range(segment_count):
@@ -57,7 +54,6 @@ func _process(delta: float) -> void:
 	var local_points: PackedVector2Array = []
 	for p in segment_positions:
 		local_points.append(to_local(p))
-	body_line.points = local_points
 
 	queue_redraw()
 
@@ -65,28 +61,30 @@ func _draw() -> void:
 	if segment_positions.size() < 3:
 		return
 
-	# --- 1. DORSAL SCALE BANDS ---
-	for i in range(1, segment_count - 1):
+	# --- 1. VOLUMETRIC 3D BODY SEGMENTS ---
+	# We loop BACKWARDS (tail to head) so segments overlap each other accurately in 3D space
+	for i in range(segment_count - 1, 0, -1):
 		var curr = to_local(segment_positions[i])
-		var prev = to_local(segment_positions[i - 1])
-		var seg_dir = (curr - prev).normalized()
-		var seg_perp = Vector2(-seg_dir.y, seg_dir.x)
+		
+		# Taper the tail (smaller circles at the end, larger near the neck)
+		var t = float(segment_count - i) / float(segment_count)
+		var radius = lerp(2.0, 9.0, t)
 
-		var t = float(i) / float(segment_count)
-		var band_width = lerp(4.2, 1.2, t)
+		# A. Ground Shadow (Elevates the body into 3D space)
+		draw_circle(curr + Vector2(0, 10), radius * 0.9, Color(0.0, 0.0, 0.0, 0.3))
 
-		# Dark belly shade
-		if i % 2 == 0:
-			draw_line(curr - seg_perp * band_width, curr + seg_perp * band_width, Color(0.04, 0.12, 0.06), 2.2)
-		else:
-			# Specular golden scales
-			var diamond = PackedVector2Array([
-				curr - seg_dir * 1.8,
-				curr + seg_perp * (band_width * 0.7),
-				curr + seg_dir * 1.8,
-				curr - seg_perp * (band_width * 0.7)
-			])
-			draw_colored_polygon(diamond, Color(0.98, 0.88, 0.35))
+		# B. Thick Dark Outline (Preserves cartoon style)
+		draw_circle(curr, radius + 2.0, Color(0.04, 0.12, 0.05))
+
+		# C. Base Green Body Volume
+		draw_circle(curr, radius, Color(0.16, 0.48, 0.2))
+
+		# D. Curved 3D Highlight (Offset to the top-left to simulate a sphere)
+		draw_circle(curr + Vector2(-radius * 0.35, -radius * 0.35), radius * 0.4, Color(0.4, 0.8, 0.4, 0.8))
+
+		# E. Golden Dorsal Pattern
+		if i % 2 != 0:
+			draw_circle(curr + Vector2(radius * 0.1, -radius * 0.1), radius * 0.3, Color(0.92, 0.82, 0.25))
 
 	# --- 2. HEAD CALCULATIONS ---
 	var head_pos = to_local(segment_positions[0])
@@ -96,51 +94,49 @@ func _draw() -> void:
 		head_dir = Vector2.RIGHT
 	var head_perp = Vector2(-head_dir.y, head_dir.x)
 
-	var snout = head_pos + head_dir * 7.5
-	var left_flare = head_pos + head_dir * 1.0 + head_perp * 5.2
-	var left_base = head_pos - head_dir * 2.8 + head_perp * 3.5
-	var right_base = head_pos - head_dir * 2.8 - head_perp * 3.5
-	var right_flare = head_pos + head_dir * 1.0 - head_perp * 5.2
+	var snout = head_pos + head_dir * 8.0
+	var left_flare = head_pos + head_dir * 1.0 + head_perp * 6.5
+	var left_base = head_pos - head_dir * 3.5 + head_perp * 4.0
+	var right_base = head_pos - head_dir * 3.5 - head_perp * 4.0
+	var right_flare = head_pos + head_dir * 1.0 - head_perp * 6.5
 
 	var head_points = PackedVector2Array([snout, left_flare, left_base, right_base, right_flare])
-
-	# Dark edge rim
-	draw_polyline(PackedVector2Array([snout, left_flare, left_base, right_base, right_flare, snout]), Color(0.04, 0.12, 0.05), 1.8)
 	
-	# Main head base fill
+	# Head Ground Shadow
+	var shadow_offset = Vector2(0, 10)
+	var shadow_points = PackedVector2Array([snout + shadow_offset, left_flare + shadow_offset, left_base + shadow_offset, right_base + shadow_offset, right_flare + shadow_offset])
+	draw_colored_polygon(shadow_points, Color(0, 0, 0, 0.3))
+
+	# --- 3. DRAW HEAD ---
+	# Outline
+	draw_polyline(PackedVector2Array([snout, left_flare, left_base, right_base, right_flare, snout]), Color(0.04, 0.12, 0.05), 2.5)
+	# Solid Fill
 	draw_colored_polygon(head_points, Color(0.16, 0.48, 0.2))
+	
+	# 3D Dome Highlight on the head
+	var dome_highlight = PackedVector2Array([snout - head_dir * 1.5, left_flare - head_perp * 2.0, head_pos, right_flare + head_perp * 2.0])
+	draw_colored_polygon(dome_highlight, Color(0.4, 0.8, 0.4, 0.5))
 
-	# 3D Dome Highlight (upper hemisphere of the head)
-	var dome_highlight = PackedVector2Array([
-		snout - head_dir * 1.0,
-		left_flare - head_perp * 1.5,
-		head_pos,
-		right_flare + head_perp * 1.5
-	])
-	draw_colored_polygon(dome_highlight, Color(0.35, 0.75, 0.4, 0.55))
+	# --- 4. EYES ---
+	var eye_pos_left = head_pos + head_dir * 1.5 + head_perp * 4.0
+	var eye_pos_right = head_pos + head_dir * 1.5 - head_perp * 4.0
 
-	# --- 3. EYES ---
-	var eye_pos_left = head_pos + head_dir * 1.2 + head_perp * 3.4
-	var eye_pos_right = head_pos + head_dir * 1.2 - head_perp * 3.4
-
-	draw_circle(eye_pos_left, 2.4, Color.BLACK)
-	draw_circle(eye_pos_right, 2.4, Color.BLACK)
-
-	draw_circle(eye_pos_left, 1.6, Color(1.0, 0.9, 0.1))
-	draw_circle(eye_pos_right, 1.6, Color(1.0, 0.9, 0.1))
-
+	draw_circle(eye_pos_left, 2.5, Color.BLACK)
+	draw_circle(eye_pos_right, 2.5, Color.BLACK)
+	draw_circle(eye_pos_left, 1.5, Color(1.0, 0.9, 0.1))
+	draw_circle(eye_pos_right, 1.5, Color(1.0, 0.9, 0.1))
 	draw_line(eye_pos_left - head_dir * 1.2, eye_pos_left + head_dir * 1.2, Color.BLACK, 1.0)
 	draw_line(eye_pos_right - head_dir * 1.2, eye_pos_right + head_dir * 1.2, Color.BLACK, 1.0)
 
-	# --- 4. TONGUE ---
+	# --- 5. TONGUE ---
 	var tongue_cycle = fmod(tongue_timer, 1.6)
 	if tongue_cycle < 0.22:
 		var tongue_base = snout
 		var tongue_tip = snout + head_dir * 7.0
 		var tongue_col = Color(0.95, 0.15, 0.2)
-		draw_line(tongue_base, tongue_tip, tongue_col, 1.3)
-		draw_line(tongue_tip, tongue_tip + (head_dir * 2.2 + head_perp * 2.0), tongue_col, 1.0)
-		draw_line(tongue_tip, tongue_tip + (head_dir * 2.2 - head_perp * 2.0), tongue_col, 1.0)
+		draw_line(tongue_base, tongue_tip, tongue_col, 1.5)
+		draw_line(tongue_tip, tongue_tip + (head_dir * 2.5 + head_perp * 2.5), tongue_col, 1.2)
+		draw_line(tongue_tip, tongue_tip + (head_dir * 2.5 - head_perp * 2.5), tongue_col, 1.2)
 
 func take_hit() -> void:
 	if has_node("CollisionShape2D"):
