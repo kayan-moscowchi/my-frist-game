@@ -1,22 +1,31 @@
 extends Area2D
 
-@export var crawl_speed: float = 125.0
-@export var segment_count: int = 22
-@export var segment_spacing: float = 5.5
-@export var wave_frequency: float = 8.0
-@export var wave_amplitude: float = 16.0
+@export var crawl_speed: float = 115.0
+@export var enrage_time: float = 10.0
+@export var enraged_speed_multiplier: float = 1.6
+
+@export var segment_count: int = 14
+@export var segment_spacing: float = 6.5
+@export var wave_frequency: float = 8.5
+@export var wave_amplitude: float = 12.0
 
 var player_ref: Node2D = null
 var segment_positions: Array[Vector2] = []
 var wave_phase: float = 0.0
 var tongue_timer: float = 0.0
 
+var time_alive: float = 0.0
+var is_enraged: bool = false
+var base_crawl_speed: float = 0.0
+var transition_progress: float = 0.0 # Tracks the morphing animation (0.0 to 1.0)
+
 func _ready() -> void:
 	add_to_group("snakes")
 	area_entered.connect(_on_area_entered)
 	player_ref = get_tree().get_first_node_in_group("player")
-
 	rotation = 0.0
+	
+	base_crawl_speed = crawl_speed
 
 	for i in range(segment_count):
 		segment_positions.append(global_position - Vector2(i * segment_spacing, 0))
@@ -25,35 +34,38 @@ func _process(delta: float) -> void:
 	if player_ref == null or not is_instance_valid(player_ref):
 		return
 
+	# --- ENRAGE LOGIC ---
+	time_alive += delta
+	if time_alive >= enrage_time:
+		if not is_enraged:
+			is_enraged = true
+			crawl_speed = base_crawl_speed * enraged_speed_multiplier
+			wave_frequency *= 1.5 # Wriggle faster
+
+		# Smoothly transition colors and size over 0.5 seconds
+		if transition_progress < 1.0:
+			transition_progress = min(1.0, transition_progress + delta * 2.0)
+
 	wave_phase += delta * wave_frequency
 	tongue_timer += delta
 
-	# 1. Base direction toward wizard
 	var to_player = (player_ref.global_position - global_position).normalized()
-
-	# 2. Traveling serpentine undulation
 	var lateral = Vector2(-to_player.y, to_player.x)
 	var slither_wave = lateral * sin(wave_phase) * wave_amplitude
 	var move_dir = (to_player * crawl_speed + slither_wave).normalized()
 
 	position += move_dir * crawl_speed * delta
 
-	# 3. Inverse Kinematic Spine Constraint
 	segment_positions[0] = global_position
 	for i in range(1, segment_count):
 		var prev = segment_positions[i - 1]
 		var curr = segment_positions[i]
 		var dir = (curr - prev).normalized()
 
-		var spine_phase = wave_phase - (float(i) * 0.48)
-		var harmonic_wave = Vector2(-dir.y, dir.x) * sin(spine_phase) * 0.9
+		var spine_phase = wave_phase - (float(i) * 0.45)
+		var harmonic_wave = Vector2(-dir.y, dir.x) * sin(spine_phase) * 0.7
 
 		segment_positions[i] = prev + dir * segment_spacing + harmonic_wave
-
-	# 4. Feed points to Line2D
-	var local_points: PackedVector2Array = []
-	for p in segment_positions:
-		local_points.append(to_local(p))
 
 	queue_redraw()
 
@@ -61,82 +73,117 @@ func _draw() -> void:
 	if segment_positions.size() < 3:
 		return
 
-	# --- 1. VOLUMETRIC 3D BODY SEGMENTS ---
-	# We loop BACKWARDS (tail to head) so segments overlap each other accurately in 3D space
+	# --- DYNAMIC ENRAGE VARIABLES ---
+	# Interpolate between normal colors and angry "poisonous" colors
+	var current_skin = Color(0.15, 0.55, 0.2).lerp(Color(0.55, 0.1, 0.15), transition_progress) # Green to Deep Crimson
+	var current_spot = Color(0.95, 0.9, 0.15).lerp(Color(1.0, 0.6, 0.0), transition_progress)   # Yellow to Bright Orange
+	var current_eye = Color(0.9, 0.8, 0.1).lerp(Color(1.0, 0.0, 0.0), transition_progress)      # Yellow to Pure Red
+	
+	# The snake swells up by 25% when enraged
+	var size = lerp(1.0, 1.25, transition_progress) 
+
+	var shadow_col = Color(0.0, 0.0, 0.0, 0.4)
+	var wet_gloss = Color(0.8, 0.95, 0.7, 0.35)
+
+	# --- 1. OPTIMIZED GROUND SHADOW ---
+	var shadow_points = PackedVector2Array()
+	for p in segment_positions:
+		shadow_points.append(to_local(p) + Vector2(0, 2.5 * size))
+	draw_polyline(shadow_points, shadow_col, 8.0 * size, true) 
+
+	# --- 2. SWELLING BODY ---
 	for i in range(segment_count - 1, 0, -1):
 		var curr = to_local(segment_positions[i])
+		var next = to_local(segment_positions[i - 1])
 		
-		# Taper the tail (smaller circles at the end, larger near the neck)
-		var t = float(segment_count - i) / float(segment_count)
-		var radius = lerp(2.0, 9.0, t)
+		var dir = (next - curr).normalized()
+		var perp = Vector2(-dir.y, dir.x)
+		
+		var t_curr = float(segment_count - i) / float(segment_count)
+		var t_next = float(segment_count - (i - 1)) / float(segment_count)
+		
+		# Apply the swelling multiplier (size)
+		var r_curr = lerp(1.5, 6.0, t_curr) * size
+		var r_next = lerp(1.5, 6.0, t_next) * size
 
-		# A. Ground Shadow (Elevates the body into 3D space)
-		draw_circle(curr + Vector2(0, 10), radius * 0.9, Color(0.0, 0.0, 0.0, 0.3))
+		draw_circle(curr, r_curr, current_skin)
+		var body_quad = PackedVector2Array([
+			curr + perp * r_curr, curr - perp * r_curr,
+			next - perp * r_next, next + perp * r_next
+		])
+		draw_colored_polygon(body_quad, current_skin)
 
-		# B. Thick Dark Outline (Preserves cartoon style)
-		draw_circle(curr, radius + 2.0, Color(0.04, 0.12, 0.05))
+		if i % 2 != 0 and i < segment_count - 1:
+			var side_offset = 1.0 if (i % 3 == 0) else -1.0 
+			var spot_pos = curr + perp * (r_curr * 0.4) * side_offset
+			draw_circle(spot_pos, r_curr * 0.65, current_spot)
 
-		# C. Base Green Body Volume
-		draw_circle(curr, radius, Color(0.16, 0.48, 0.2))
+		var gloss_quad = PackedVector2Array([
+			curr + perp * (r_curr * 0.25) + Vector2(-1.0, -1.0), curr - perp * (r_curr * 0.1) + Vector2(-1.0, -1.0),
+			next - perp * (r_next * 0.1) + Vector2(-1.0, -1.0), next + perp * (r_next * 0.25) + Vector2(-1.0, -1.0)
+		])
+		draw_colored_polygon(gloss_quad, wet_gloss)
 
-		# D. Curved 3D Highlight (Offset to the top-left to simulate a sphere)
-		draw_circle(curr + Vector2(-radius * 0.35, -radius * 0.35), radius * 0.4, Color(0.4, 0.8, 0.4, 0.8))
-
-		# E. Golden Dorsal Pattern
-		if i % 2 != 0:
-			draw_circle(curr + Vector2(radius * 0.1, -radius * 0.1), radius * 0.3, Color(0.92, 0.82, 0.25))
-
-	# --- 2. HEAD CALCULATIONS ---
+	# --- 3. ENGORGED HEAD ---
 	var head_pos = to_local(segment_positions[0])
 	var neck_pos = to_local(segment_positions[1])
 	var head_dir = (head_pos - neck_pos).normalized()
-	if head_dir == Vector2.ZERO:
-		head_dir = Vector2.RIGHT
+	if head_dir == Vector2.ZERO: head_dir = Vector2.RIGHT
 	var head_perp = Vector2(-head_dir.y, head_dir.x)
 
-	var snout = head_pos + head_dir * 8.0
-	var left_flare = head_pos + head_dir * 1.0 + head_perp * 6.5
-	var left_base = head_pos - head_dir * 3.5 + head_perp * 4.0
-	var right_base = head_pos - head_dir * 3.5 - head_perp * 4.0
-	var right_flare = head_pos + head_dir * 1.0 - head_perp * 6.5
+	# Multiply all head proportions by our `size` variable
+	var snout = head_pos + head_dir * (15.0 * size)
+	var snout_tip_l = head_pos + head_dir * (14.2 * size) + head_perp * (3.0 * size)
+	var snout_mid_l = head_pos + head_dir * (10.5 * size) + head_perp * (6.0 * size)
+	var cheek_l = head_pos + head_dir * (3.5 * size) + head_perp * (8.8 * size)
+	var base_l = head_pos - head_dir * (3.0 * size) + head_perp * (5.5 * size)
+	var base_r = head_pos - head_dir * (3.0 * size) - head_perp * (5.5 * size)
+	var cheek_r = head_pos + head_dir * (3.5 * size) - head_perp * (8.8 * size)
+	var snout_mid_r = head_pos + head_dir * (10.5 * size) - head_perp * (6.0 * size)
+	var snout_tip_r = head_pos + head_dir * (14.2 * size) - head_perp * (3.0 * size)
 
-	var head_points = PackedVector2Array([snout, left_flare, left_base, right_base, right_flare])
-	
-	# Head Ground Shadow
-	var shadow_offset = Vector2(0, 10)
-	var shadow_points = PackedVector2Array([snout + shadow_offset, left_flare + shadow_offset, left_base + shadow_offset, right_base + shadow_offset, right_flare + shadow_offset])
-	draw_colored_polygon(shadow_points, Color(0, 0, 0, 0.3))
+	var head_points = PackedVector2Array([snout, snout_tip_l, snout_mid_l, cheek_l, base_l, base_r, cheek_r, snout_mid_r, snout_tip_r])
+	var outline_points = PackedVector2Array([snout, snout_tip_l, snout_mid_l, cheek_l, base_l, base_r, cheek_r, snout_mid_r, snout_tip_r, snout])
 
-	# --- 3. DRAW HEAD ---
-	# Outline
-	draw_polyline(PackedVector2Array([snout, left_flare, left_base, right_base, right_flare, snout]), Color(0.04, 0.12, 0.05), 2.5)
-	# Solid Fill
-	draw_colored_polygon(head_points, Color(0.16, 0.48, 0.2))
+	var h_shadow_points = PackedVector2Array()
+	for pt in head_points:
+		h_shadow_points.append(pt + Vector2(0, 3.5 * size))
+	draw_colored_polygon(h_shadow_points, shadow_col)
+
+	draw_polyline(outline_points, Color(0.04, 0.1, 0.04), 2.5 * size)
+	draw_colored_polygon(head_points, current_skin)
 	
-	# 3D Dome Highlight on the head
-	var dome_highlight = PackedVector2Array([snout - head_dir * 1.5, left_flare - head_perp * 2.0, head_pos, right_flare + head_perp * 2.0])
-	draw_colored_polygon(dome_highlight, Color(0.4, 0.8, 0.4, 0.5))
+	var crown_highlight = PackedVector2Array([
+		head_pos + head_dir * (9.5 * size), 
+		head_pos + head_dir * (4.0 * size) + head_perp * (4.5 * size), 
+		head_pos - head_dir * (1.5 * size), 
+		head_pos + head_dir * (4.0 * size) - head_perp * (4.5 * size)
+	])
+	draw_colored_polygon(crown_highlight, Color(0.8, 0.95, 0.7, 0.4))
 
 	# --- 4. EYES ---
-	var eye_pos_left = head_pos + head_dir * 1.5 + head_perp * 4.0
-	var eye_pos_right = head_pos + head_dir * 1.5 - head_perp * 4.0
+	var eye_l = head_pos + head_dir * (7.5 * size) + head_perp * (5.0 * size)
+	var eye_r = head_pos + head_dir * (7.5 * size) - head_perp * (5.0 * size)
 
-	draw_circle(eye_pos_left, 2.5, Color.BLACK)
-	draw_circle(eye_pos_right, 2.5, Color.BLACK)
-	draw_circle(eye_pos_left, 1.5, Color(1.0, 0.9, 0.1))
-	draw_circle(eye_pos_right, 1.5, Color(1.0, 0.9, 0.1))
-	draw_line(eye_pos_left - head_dir * 1.2, eye_pos_left + head_dir * 1.2, Color.BLACK, 1.0)
-	draw_line(eye_pos_right - head_dir * 1.2, eye_pos_right + head_dir * 1.2, Color.BLACK, 1.0)
+	draw_circle(eye_l, 2.8 * size, Color.BLACK)
+	draw_circle(eye_r, 2.8 * size, Color.BLACK)
+	draw_circle(eye_l, 1.6 * size, current_eye)
+	draw_circle(eye_r, 1.6 * size, current_eye)
+	draw_line(eye_l - head_dir * (1.5 * size), eye_l + head_dir * (1.5 * size), Color.BLACK, 1.6 * size)
+	draw_line(eye_r - head_dir * (1.5 * size), eye_r + head_dir * (1.5 * size), Color.BLACK, 1.6 * size)
+	draw_circle(eye_l + head_dir * (0.7 * size) - head_perp * (0.6 * size), 0.7 * size, Color.WHITE)
+	draw_circle(eye_r + head_dir * (0.7 * size) + head_perp * (0.6 * size), 0.7 * size, Color.WHITE)
 
-	# --- 5. TONGUE ---
-	var tongue_cycle = fmod(tongue_timer, 1.6)
-	if tongue_cycle < 0.22:
-		var tongue_base = snout
-		var tongue_tip = snout + head_dir * 7.0
-		var tongue_col = Color(0.95, 0.15, 0.2)
-		draw_line(tongue_base, tongue_tip, tongue_col, 1.5)
-		draw_line(tongue_tip, tongue_tip + (head_dir * 2.5 + head_perp * 2.5), tongue_col, 1.2)
-		draw_line(tongue_tip, tongue_tip + (head_dir * 2.5 - head_perp * 2.5), tongue_col, 1.2)
+	# --- 5. FRANTIC TONGUE ---
+	# Normal tongue flicks slowly. Enraged tongue flicks twice as fast.
+	var tongue_active = (fmod(tongue_timer, 1.6) < 0.2) if not is_enraged else (fmod(tongue_timer, 0.4) < 0.15)
+	
+	if tongue_active:
+		var t_tip = snout + head_dir * (7.0 * size)
+		var t_col = Color(0.8, 0.1, 0.1)
+		draw_line(snout, t_tip, t_col, 2.0 * size)
+		draw_line(t_tip, t_tip + head_dir * (2.8 * size) + head_perp * (2.2 * size), t_col, 1.5 * size)
+		draw_line(t_tip, t_tip + head_dir * (2.8 * size) - head_perp * (2.2 * size), t_col, 1.5 * size)
 
 func take_hit() -> void:
 	if has_node("CollisionShape2D"):
