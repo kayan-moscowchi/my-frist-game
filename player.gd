@@ -5,8 +5,8 @@ const SPEED: float = 300.0
 const TARGET_SCORE: int = 10
 const MAX_HP: int = 5
 const PORTAL_INTERVAL: int = 10
-const PORTAL_OPEN_DURATION: int = 10
-const PORTAL_COOLDOWN_DURATION: int = 15
+const PORTAL_OPEN_DURATION: int = 15
+const PORTAL_COOLDOWN_DURATION: int = 20
 
 # --- PRELOADS ---
 var time_bomb_scene: PackedScene = preload("res://time_bomb.tscn")
@@ -18,6 +18,14 @@ var snake_scene: PackedScene = preload("res://snake.tscn")
 @export var portal_scene: PackedScene = preload("res://portal.tscn")
 
 # --- GAMEPLAY STATE ---
+@export var base_snake_spawn_rate: float = 5.0 # Starts at 5 seconds
+@export var min_snake_spawn_rate: float = 0.5  # Cap the max difficulty at 0.5 seconds
+@export var spawn_rate_decrease: float = 0.5   # Gets 0.5 seconds faster every portal
+
+@export var max_hearts_on_map: int = 3         # Maximum hearts allowed at once
+@export var heart_spawn_interval: float = 10.0 # Spawns a heart every x seconds
+
+var current_snake_spawn_rate: float = 5.0
 var score: int = 0
 var hp: int = 3
 var game_started: bool = false
@@ -58,7 +66,6 @@ func _ready() -> void:
 	$"../HUD/HealthLabel".hide()
 	hide()
 
-
 func _process(delta: float) -> void:
 	if game_over:
 		if Input.is_physical_key_pressed(KEY_R):
@@ -73,6 +80,17 @@ func _process(delta: float) -> void:
 	rotation = (mouse_pos - global_position).angle()
 	
 	update_coin_indicator()
+
+	# --- NEW: ARROW BLINKING LOGIC ---
+	if portal_is_open and has_node("../HUD/PortalIndicator"):
+		var indicator = $"../HUD/PortalIndicator"
+		if portal_cycle_timer > 10: 
+			# During the 5-second warmup, flash on and off every 250 milliseconds
+			indicator.modulate.a = 1.0 if int(Time.get_ticks_msec() / 250.0) % 2 == 0 else 0.0
+		else:
+			# Force it back to solid visibility once the portal is fully open
+			indicator.modulate.a = 1.0
+	# ---------------------------------
 
 	# WASD / Arrow Movement
 	var velocity = Vector2.ZERO
@@ -93,7 +111,6 @@ func _process(delta: float) -> void:
 	# Clamp wizard inside visible playable boundary
 	position.x = clamp(position.x, 32, map_size.x - 32)
 	position.y = clamp(position.y, 32, map_size.y - 32)
-
 
 func _unhandled_input(event: InputEvent) -> void:
 	# Cast Spell on Left Click
@@ -174,20 +191,16 @@ func spawn_extraction_portal() -> void:
 	# Clear any previous portal instance
 	get_tree().call_group("portal", "queue_free")
 	
-	# Pick random edge
-	var edge = randi() % 4
-	var portal_pos = Vector2.ZERO
-	match edge:
-		0: portal_pos = Vector2(randf_range(60, map_size.x - 60), 45)             # Top
-		1: portal_pos = Vector2(randf_range(60, map_size.x - 60), map_size.y - 45) # Bottom
-		2: portal_pos = Vector2(45, randf_range(60, map_size.y - 60))             # Left
-		3: portal_pos = Vector2(map_size.x - 45, randf_range(60, map_size.y - 60)) # Right
+	# Spawn anywhere inside the map boundaries (leaving a 100px margin so it doesn't clip off-screen)
+	var margin = 100.0
+	var portal_pos = Vector2(
+		randf_range(margin, map_size.x - margin),
+		randf_range(margin, map_size.y - margin)
+	)
 
 	var portal = portal_scene.instantiate()
 	portal.global_position = portal_pos
 	get_parent().add_child(portal)
-
-	# Removed spawn_floating_text line here
 
 	if get_parent().has_node("HUD/PortalIndicator"):
 		get_parent().get_node("HUD/PortalIndicator").track(portal, self)
@@ -250,7 +263,7 @@ func _on_area_entered(area: Area2D) -> void:
 	elif area.is_in_group("time_bombs"):
 		take_damage()
 
-	# Snake hit (Snake script handles SnakeBiteSound before calling this)
+	# Snake hit 
 	elif area.is_in_group("snakes"):
 		take_damage()
 
@@ -305,11 +318,17 @@ func _on_timer_timeout() -> void:
 	
 	if has_node("../HUD/TimeLabel"):
 		if portal_is_open:
-			# Portal is currently active and counting down its remaining open time
-			$"../HUD/TimeLabel".text = "ESCAPE! (" + str(portal_cycle_timer) + "s)"
-			$"../HUD/TimeLabel".modulate = Color(0.2, 0.9, 1.0)
+			if portal_cycle_timer > 10:
+				# --- WARMUP PHASE (Seconds 13, 12, 11 map to 3, 2, 1) ---
+				var warmup_left = portal_cycle_timer - 10
+				$"../HUD/TimeLabel".text = "Forming... (" + str(warmup_left) + "s)"
+				$"../HUD/TimeLabel".modulate = Color(1.0, 0.7, 0.2) # Warning Orange
+			else:
+				# --- ESCAPE PHASE (Seconds 10 down to 0) ---
+				$"../HUD/TimeLabel".text = "ESCAPE! (" + str(portal_cycle_timer) + "s)"
+				$"../HUD/TimeLabel".modulate = Color(0.2, 0.9, 1.0) # Escape Blue
 		else:
-			# Portal is inactive and counting down to spawn
+			# --- COOLDOWN PHASE ---
 			$"../HUD/TimeLabel".text = "Portal in: " + str(portal_cycle_timer) + "s"
 			$"../HUD/TimeLabel".modulate = Color.WHITE
 
@@ -320,12 +339,18 @@ func _on_timer_timeout() -> void:
 			portal_is_open = false
 			portal_cycle_timer = PORTAL_COOLDOWN_DURATION
 			get_tree().call_group("portal", "close_portal")
+			
+			# Increase Difficulty
+			current_snake_spawn_rate = max(min_snake_spawn_rate, current_snake_spawn_rate - spawn_rate_decrease)
+			
+			if has_node("../SnakeTimer"):
+				$"../SnakeTimer".wait_time = current_snake_spawn_rate
+				
 		else:
-			# Cooldown finished: spawn new portal for 10s
+			# Cooldown finished: spawn new portal for 13s (3s warmup + 10s open)
 			portal_is_open = true
 			portal_cycle_timer = PORTAL_OPEN_DURATION
 			spawn_extraction_portal()
-
 
 func _on_snake_timer_timeout() -> void:
 	if game_over or not game_started:
@@ -343,10 +368,14 @@ func _on_snake_timer_timeout() -> void:
 	snake.position = spawn_pos
 	get_parent().add_child(snake)
 
-
 func _on_heart_timer_timeout() -> void:
 	if game_over or not game_started:
 		return
+		
+	# --- NEW: Check the heart limit before spawning ---
+	var current_hearts = get_tree().get_nodes_in_group("hearts").size()
+	if current_hearts >= max_hearts_on_map:
+		return # Cancel the spawn if the map is already full of hearts!
 	
 	var new_heart = heart_scene.instantiate()
 	new_heart.position = Vector2(
@@ -354,7 +383,6 @@ func _on_heart_timer_timeout() -> void:
 		randf_range(64, map_size.y - 64)
 	)
 	get_parent().add_child(new_heart)
-
 
 func _on_time_bomb_timer_timeout() -> void:
 	if game_over or not game_started:
@@ -367,7 +395,6 @@ func _on_time_bomb_timer_timeout() -> void:
 		randf_range(margin, map_size.y - margin)
 	)
 	get_parent().add_child(bomb)
-
 
 # ==========================================
 # 6. UI & HUD HELPERS
@@ -410,6 +437,10 @@ func _on_start_button_pressed() -> void:
 	hp = 3
 	update_hp_display()
 	
+	current_snake_spawn_rate = base_snake_spawn_rate
+	if has_node("../SnakeTimer"):
+		$"../SnakeTimer".wait_time = current_snake_spawn_rate
+	
 	portal_cycle_timer = PORTAL_INTERVAL
 	if has_node("../HUD/TimeLabel"):
 		$"../HUD/TimeLabel".text = "Portal in: " + str(portal_cycle_timer) + "s"
@@ -443,6 +474,7 @@ func _on_start_button_pressed() -> void:
 	
 	$"../Timer".start()
 	if has_node("../HeartTimer"):
+		$"../HeartTimer".wait_time = heart_spawn_interval
 		$"../HeartTimer".start()
 	if has_node("../TimeBombTimer"):
 		$"../TimeBombTimer".start()

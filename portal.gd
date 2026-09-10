@@ -1,22 +1,33 @@
 extends Area2D
 
-@export var lifetime: float = 10.0 # Remains open for 10 seconds
+@export var lifetime: float = 15.0 
+@export var warmup_duration: float = 5.0
+
 var alive_time: float = 0.0
 var is_closing: bool = false
+var is_active: bool = false 
 
 func _ready() -> void:
 	add_to_group("portal")
 	area_entered.connect(_on_area_entered)
 	
 	scale = Vector2.ZERO
-	var tween = create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tween.tween_property(self, "scale", Vector2.ONE, 0.4)
+	modulate = Color(1.0, 1.0, 1.0, 0.1)
+	
+	var tween = create_tween().set_parallel(true)
+	tween.tween_property(self, "scale", Vector2.ONE, warmup_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.tween_property(self, "modulate", Color(1.0, 1.0, 1.0, 0.6), warmup_duration - 0.4)
+	tween.chain().tween_property(self, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.4).set_trans(Tween.TRANS_BOUNCE)
 
 func _process(delta: float) -> void:
 	if is_closing:
 		return
 
 	alive_time += delta
+	
+	if alive_time >= warmup_duration and not is_active:
+		is_active = true
+		
 	queue_redraw()
 	
 	if alive_time >= lifetime:
@@ -25,30 +36,66 @@ func _process(delta: float) -> void:
 func close_portal() -> void:
 	is_closing = true
 	
-	# Hide navigation indicator arrow as the portal vanishes
 	var main = get_parent()
 	if main and main.has_node("HUD/PortalIndicator"):
 		main.get_node("HUD/PortalIndicator").visible = false
 
-	var tween = create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	var tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
 	tween.tween_property(self, "scale", Vector2.ZERO, 0.45)
+	tween.tween_property(self, "modulate", Color(1, 1, 1, 0), 0.45)
+	
 	await tween.finished
 	queue_free()
 
 func _draw() -> void:
-	var pulse = sin(alive_time * 6.0) * 2.0
+	var time_left = lifetime - alive_time
+	var is_beating = is_active and time_left <= 3.0
 	
-	draw_circle(Vector2.ZERO, 22.0 + pulse, Color(0.1, 0.25, 0.8, 0.35))
-	draw_circle(Vector2.ZERO, 16.0 - pulse * 0.5, Color(0.35, 0.7, 1.0, 0.65))
-	draw_circle(Vector2.ZERO, 8.0, Color(0.9, 0.95, 1.0, 0.95))
+	var pulse = sin(alive_time * 5.0) * 4.0
+	var core_color = Color(0.9, 0.95, 1.0, 0.95)
 	
-	for i in range(4):
-		var angle = alive_time * 3.0 + (i * PI * 0.5)
-		var rune_pos = Vector2(cos(angle), sin(angle)) * (17.0 + pulse)
-		draw_circle(rune_pos, 2.5, Color(0.95, 0.85, 0.3))
+	if is_beating:
+		pulse += sin(alive_time * 30.0) * 8.0
+		var flash = (sin(alive_time * 20.0) + 1.0) * 0.5 
+		core_color = core_color.lerp(Color(1.0, 0.3, 0.1, 1.0), flash)
+	
+	# Rings and Core
+	draw_circle(Vector2.ZERO, 55.0 + pulse, Color(0.1, 0.25, 0.8, 0.25))   
+	draw_circle(Vector2.ZERO, 38.0 - pulse * 0.5, Color(0.35, 0.7, 1.0, 0.5)) 
+	draw_circle(Vector2.ZERO, 20.0 + pulse * 0.8, core_color)               
+	
+	# Magical Arcs
+	for i in range(3):
+		var ring_angle = alive_time * 2.0 + (i * PI * 0.66)
+		draw_arc(Vector2.ZERO, 46.0 + pulse, ring_angle, ring_angle + PI * 0.8, 24, Color(0.4, 0.8, 1.0, 0.6), 4.0, true)
+		draw_arc(Vector2.ZERO, 28.0 - pulse, -ring_angle, -ring_angle + PI * 0.8, 24, Color(0.9, 0.9, 1.0, 0.8), 2.0, true)
+	
+	# Orbiting Runes
+	for i in range(8):
+		var angle = -alive_time * 1.5 + (i * PI * 0.25)
+		var rune_pos = Vector2(cos(angle), sin(angle)) * (65.0 + pulse * 0.5)
+		var rune_alpha = 0.4 + sin(alive_time * 10.0 + i) * 0.6
+		draw_circle(rune_pos, 4.0, Color(0.95, 0.85, 0.3, rune_alpha))
+
+	# --- THE COUNTDOWN ---
+	if not is_active:
+		# Calculate the remaining seconds (3, 2, or 1)
+		var count = int(ceil(warmup_duration - alive_time))
+		if count > 0:
+			var font = ThemeDB.fallback_font
+			var text = str(count)
+			var font_size = 48
+			
+			# Center the text perfectly based on the font size
+			var text_size = font.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
+			var text_pos = Vector2(-text_size.x / 2.0, text_size.y * 0.25) 
+			
+			# Draw a subtle drop shadow, then the white number
+			draw_string(font, text_pos + Vector2(2, 2), text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size, Color(0, 0, 0, 0.5))
+			draw_string(font, text_pos, text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size, Color.WHITE)
 
 func _on_area_entered(area: Area2D) -> void:
-	if is_closing:
+	if is_closing or not is_active:
 		return
 
 	if area.is_in_group("player"):

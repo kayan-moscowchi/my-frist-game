@@ -89,7 +89,10 @@ func _draw() -> void:
 		shadow_points.append(to_local(p) + Vector2(0, 2.5 * size))
 	draw_polyline(shadow_points, shadow_col, 8.0 * size, true) 
 
-	# --- 2. BODY ---
+# --- 2. BODY OUTLINE (Pass 1: Silhouette) ---
+	var outline_color = Color(0.04, 0.1, 0.04) # Matches the dark color of the head outline
+	var outline_thick = 1.25 * size            # Perfectly matches the head line thickness
+	
 	for i in range(segment_count - 1, 0, -1):
 		var curr = to_local(segment_positions[i])
 		var next = to_local(segment_positions[i - 1])
@@ -103,6 +106,29 @@ func _draw() -> void:
 		var r_curr = lerp(1.5, 6.0, t_curr) * size
 		var r_next = lerp(1.5, 6.0, t_next) * size
 
+		# Draw the larger dark background shapes
+		draw_circle(curr, r_curr + outline_thick, outline_color)
+		var outline_quad = PackedVector2Array([
+			curr + perp * (r_curr + outline_thick), curr - perp * (r_curr + outline_thick),
+			next - perp * (r_next + outline_thick), next + perp * (r_next + outline_thick)
+		])
+		draw_colored_polygon(outline_quad, outline_color)
+
+	# --- 2.5 BODY INTERIOR (Pass 2: Skin, Spots, Gloss) ---
+	for i in range(segment_count - 1, 0, -1):
+		var curr = to_local(segment_positions[i])
+		var next = to_local(segment_positions[i - 1])
+		
+		var dir = (next - curr).normalized()
+		var perp = Vector2(-dir.y, dir.x)
+		
+		var t_curr = float(segment_count - i) / float(segment_count)
+		var t_next = float(segment_count - (i - 1)) / float(segment_count)
+		
+		var r_curr = lerp(1.5, 6.0, t_curr) * size
+		var r_next = lerp(1.5, 6.0, t_next) * size
+
+		# Draw the inner green body on top
 		draw_circle(curr, r_curr, current_skin)
 		var body_quad = PackedVector2Array([
 			curr + perp * r_curr, curr - perp * r_curr,
