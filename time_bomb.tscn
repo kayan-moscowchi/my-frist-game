@@ -21,7 +21,8 @@ texture = ExtResource("1_0lfuq")
 shape = SubResource("CircleShape2D_y7tn2")
 disabled = true
 
-[node name="ExplodeSound" type="AudioStreamPlayer" parent="." unique_id=306918939]
+[node name="ExplodeSound" type="AudioStreamPlayer2D" parent="." unique_id=81200401]
 stream = ExtResource("3_pt2pq")
 volume_db = -0.9
+max_distance = 700.0
 bus = &"SFX"

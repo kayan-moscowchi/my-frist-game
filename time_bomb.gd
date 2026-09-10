@@ -43,23 +43,29 @@ func _draw() -> void:
 
 func explode() -> void:
 	exploded = true
-	# Trigger a big screen shake (12px intensity)
-	get_tree().call_group("camera", "shake", 12.0)
+	
+	# --- FIX: Proximity Screen Shake ---
+	var player = get_tree().get_first_node_in_group("player")
+	# Only shake if the player exists and is within 500 pixels
+	if player and global_position.distance_to(player.global_position) < 500.0:
+		get_tree().call_group("camera", "shake", 12.0)
 	
 	# Instantly hide everything visually (the sprite, redraw circles, etc.)
 	hide()
 
-	# 1. Trigger explosion sound
-	var sound: AudioStreamPlayer = null
+	# 1. Trigger explosion sound (CHANGED TO AudioStreamPlayer2D)
+	var sound: AudioStreamPlayer2D = null
 	if has_node("ExplodeSound"):
-		sound = $ExplodeSound as AudioStreamPlayer
+		sound = $ExplodeSound as AudioStreamPlayer2D
 		sound.play()
 
 	# 2. Damage Detection with generous sensitivity
 	check_player_hit()
+	
 	var blast = explosion_particles_scene.instantiate()
 	blast.position = global_position
 	get_parent().add_child(blast)
+	
 	# 3. Keep node alive only until audio finishes
 	if sound and sound.playing:
 		await sound.finished
